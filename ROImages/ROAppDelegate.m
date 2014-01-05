@@ -1,20 +1,118 @@
 //
 //  ROAppDelegate.m
 //  ROImages
+//  Abstract: Application delegate for the Image Download/Upload sample
+//  Download the image list in the background using NSURLConnection.  Once
+//  its received, create and load ROListTableViewController
 //
 //  Created by Rebecca ODell on 12/16/13.
 //  Copyright (c) 2013 Rebecca ODell. All rights reserved.
 //
 
 #import "ROAppDelegate.h"
+#import "ROListTableViewController.h"
+#import <CFNetwork/CFNetwork.h>  // to access the kCFURLErrorNotConnectedToInternet error code.
+#import "AFNetworkActivityLogger.h"
+
+static NSString *const DataFeed = @"http://ec2-184-72-25-67.us-west-1.compute.amazonaws.com:3000/download/index.json";
+
+@interface ROAppDelegate ()
+@property (nonatomic, strong) NSURLConnection *dataFeedConnection;
+@property (nonatomic, strong) NSMutableData *imageListData;
+@end
 
 @implementation ROAppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
-    // Override point for customization after application launch.
+    //[[AFNetworkActivityLogger sharedLogger] startLogging];
+    //[[AFNetworkActivityLogger sharedLogger] setLevel:AFLoggerLevelError];
+    
+    NSURLRequest *urlRequest = [NSURLRequest requestWithURL:[NSURL URLWithString:DataFeed]];
+    self.dataFeedConnection = [[NSURLConnection alloc] initWithRequest:urlRequest delegate:self];
+    
+    // Test the validity of the URL
+    NSAssert(self.dataFeedConnection != nil, @"Failure to create URL connection.");
+    
+    // show in the status bar that network activity is starting
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = YES;
+    
     return YES;
 }
+
+#pragma mark - Error Support
+
+- (void)handleError:(NSError *)error
+{
+    NSString *errorMessage = [error localizedDescription];
+    UIAlertView *alertView = [[UIAlertView alloc] initWithTitle:@"Sorry, Cannot Show Images"
+														message:errorMessage
+													   delegate:nil
+											  cancelButtonTitle:@"OK"
+											  otherButtonTitles:nil];
+    [alertView show];
+}
+
+#pragma mark - NSURLConnectionDelegate methods
+
+- (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response
+{
+    self.imageListData = [NSMutableData data];    // start off with new data
+}
+
+- (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data
+{
+    [self.imageListData appendData:data];  // append incoming data
+}
+
+- (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error
+{
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
+    
+    if ([error code] == kCFURLErrorNotConnectedToInternet)
+	{
+        // determine if it's a connection error
+        NSDictionary *userInfo = [NSDictionary dictionaryWithObject:@"No Connection Error"
+															 forKey:NSLocalizedDescriptionKey];
+        NSError *noConnectionError = [NSError errorWithDomain:NSCocoaErrorDomain
+														 code:kCFURLErrorNotConnectedToInternet
+													 userInfo:userInfo];
+        [self handleError:noConnectionError];
+    }
+	else
+	{
+        // handle all other errors generically
+        [self handleError:error];
+    }
+    
+    self.dataFeedConnection = nil;   // release our connection
+}
+
+- (void)connectionDidFinishLoading:(NSURLConnection *)connection
+{
+    self.dataFeedConnection = nil;   // release our connection
+    
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
+    
+    NSError *jsonParsingError = nil;
+    NSArray *imageFilenameArray = [NSJSONSerialization JSONObjectWithData:self.imageListData
+                                                                  options:0
+                                                                    error:&jsonParsingError];
+    NSLog(@"connectionDidFinishLoading: imageFilenameArray = %@", imageFilenameArray);
+
+    // The root rootViewController is the only child of the navigation controller
+    ROListTableViewController *listTableViewController = (ROListTableViewController*)
+                                                         [(UINavigationController*)self.window.rootViewController topViewController];
+    
+    listTableViewController.imageFilenames = imageFilenameArray;
+    
+    // tell the table view to reload its data
+    [listTableViewController.tableView reloadData];
+
+    self.imageListData = nil;
+}
+
+#pragma mark - AppDelegates
 							
 - (void)applicationWillResignActive:(UIApplication *)application
 {
